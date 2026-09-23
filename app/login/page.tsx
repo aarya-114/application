@@ -12,7 +12,7 @@ export default async function LoginPage() {
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-slate-100 px-4 py-12">
-      <section className="w-full max-w-md rounded-2xl bg-white p-8 shadow-sm ring-1 ring-slate-200">
+      <section className="w-full max-w-md rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200 sm:p-8">
         <p className="text-sm font-semibold uppercase tracking-[0.18em] text-teal-700">Quarantine Facility</p>
         <h1 className="mt-3 text-2xl font-semibold text-slate-900">Choose a demo identity</h1>
         <p className="mt-2 text-sm leading-6 text-slate-600">

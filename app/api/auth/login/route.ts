@@ -9,6 +9,9 @@ export async function POST(req: Request) {
   } catch {
     return NextResponse.json({ error: "Request body must be valid JSON." }, { status: 400 });
   }
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    return NextResponse.json({ error: "Request body must be a JSON object." }, { status: 400 });
+  }
 
   if (typeof body.userId !== "string") {
     return NextResponse.json({ error: "Choose a demo identity to sign in." }, { status: 400 });

@@ -6,6 +6,7 @@ const demoUsers = [
   { id: "demo-doctor", name: "Demo Doctor", role: "DOCTOR" },
   { id: "demo-admin", name: "Demo Admin", role: "ADMIN" },
 ];
+const DEFAULT_FEVER_THRESHOLD_ID = "fever-threshold-default";
 
 async function main() {
   for (const user of demoUsers) {
@@ -20,7 +21,23 @@ async function main() {
     });
   }
 
-  console.log("Seeded demo users and rooms 1–74.");
+  const existingThreshold = await prisma.feverThresholdSetting.findFirst({ select: { id: true } });
+  if (!existingThreshold) {
+    const now = new Date();
+    await prisma.feverThresholdSetting.upsert({
+      where: { id: DEFAULT_FEVER_THRESHOLD_ID },
+      update: {},
+      create: {
+        id: DEFAULT_FEVER_THRESHOLD_ID,
+        value: 38.0,
+        setById: "demo-doctor",
+        effectiveFrom: now,
+        createdAt: now,
+      },
+    });
+  }
+
+  console.log("Seeded demo users, rooms 1–74, and the default fever threshold when needed.");
 }
 
 main()
