@@ -6,8 +6,13 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "predev": "node prisma/generate-client.cjs",
+    "prebuild": "node prisma/generate-client.cjs",
+    "pretest:integration": "node prisma/generate-client.cjs",
     "lint": "next lint",
-    "test:integration": "node --test tests/admission.test.mjs"
+    "test:integration": "node --test tests/admission.test.mjs",
+    "db:reset:dev": "prisma migrate reset --force --skip-seed && node prisma/seed.cjs",
+    "seed:demo": "node prisma/seed-demo.cjs"
   },
   "prisma": {
     "seed": "node prisma/seed.cjs"

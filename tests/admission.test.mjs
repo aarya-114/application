@@ -130,12 +130,37 @@ beforeEach(async () => {
 
 after(async () => {
   if (serverProcess && serverProcess.exitCode === null) {
-    serverProcess.kill();
-    await Promise.race([once(serverProcess, "exit"), new Promise((resolveWait) => setTimeout(resolveWait, 5000))]);
+    const serverPid = serverProcess.pid;
+    if (process.platform === "win32") {
+      const killProcessTree = () => {
+        if (!serverPid) return;
+        spawnSync("taskkill", ["/pid", String(serverPid), "/T", "/F"], {
+          stdio: "ignore",
+          windowsHide: true,
+        });
+      };
+      // Enumerate descendants while the parent PID still exists.
+      killProcessTree();
+      try { serverProcess.kill(); } catch { /* taskkill may already have stopped it. */ }
+      // Keep the requested post-kill tree cleanup as a final sweep.
+      killProcessTree();
+    } else {
+      serverProcess.kill();
+      await Promise.race([once(serverProcess, "exit"), new Promise((resolveWait) => setTimeout(resolveWait, 5000))]);
+    }
   }
   await prisma.$disconnect();
   for (const suffix of ["", "-journal", "-shm", "-wal"]) {
-    rmSync(`${testDbPath}${suffix}`, { force: true });
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      try {
+        rmSync(`${testDbPath}${suffix}`, { force: true });
+        break;
+      } catch (error) {
+        const retryable = error?.code === "EPERM" || error?.code === "EBUSY";
+        if (!retryable || attempt === 4) break;
+        await new Promise((resolveWait) => setTimeout(resolveWait, 100));
+      }
+    }
   }
 });
 

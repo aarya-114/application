@@ -73,3 +73,40 @@ Patient names in the temperature, Doctor review, room, and discharge-review list
 ## Health check
 
 [http://localhost:3000/api/health](http://localhost:3000/api/health) returns `{"status":"ok"}`.
+
+## Database configuration
+
+Local development uses SQLite through `prisma/schema.prisma`; no local PostgreSQL service is needed. Copy `.env.example` to `.env`, then run `npm install`, `npx prisma generate`, `npx prisma migrate dev`, `npx prisma db seed`, and `npm run dev`. The root schema and existing `prisma/migrations` history remain the local default.
+
+Prisma 6.19 fixes the provider in each schema, so one schema cannot switch safely between SQLite and PostgreSQL by changing `DATABASE_URL`. Production therefore uses the model-equivalent `prisma/postgresql/schema.prisma` and its separate `prisma/postgresql/migrations` history. The client-generation hook selects the matching schema from `DATABASE_URL`; Vercel's normal Next.js build is used, so no `vercel.json` is required.
+
+## Production Deployment
+
+Create a PostgreSQL database reachable from Vercel. Set `DATABASE_URL` to its PostgreSQL connection string and set `SESSION_SECRET` to a private random value in Vercel Project Settings → Environment Variables. These are the application's required environment variables; `.env.example` contains only a local SQLite URL and placeholders.
+
+For production initialization, use a trusted terminal with production `DATABASE_URL` set in its environment. Generate the PostgreSQL client, apply migrations, then run the existing configured seed (`package.json` → `node prisma/seed.cjs`):
+
+```bash
+npx prisma generate --schema prisma/postgresql/schema.prisma
+npx prisma migrate deploy --schema prisma/postgresql/schema.prisma
+npx prisma db seed
+```
+
+The seed upserts the baseline users and rooms and adds the default threshold only when absent; it does not reset or wipe existing data. Do not use the development reset command in production. Vercel builds select the PostgreSQL Prisma schema from its configured `DATABASE_URL` before running `next build`.
+
+Vercel checklist: push the repository to GitHub; import it into Vercel; configure production `DATABASE_URL` and `SESSION_SECRET`; deploy; apply the PostgreSQL migrations and run the baseline seed if needed; redeploy after changing build-time environment variables; then verify `/api/health`, sign in with a seeded demo identity, and check the dashboard/workflow. The repository uses intentional passwordless demo authentication, not production identity verification.
+
+## Clean database initialization and development reset
+
+For a fresh local SQLite database, apply the existing migrations and seed the clean baseline:
+
+```bash
+npx prisma migrate dev
+npx prisma db seed
+```
+
+The baseline contains 74 available rooms, three demo users (Nurse, Doctor, Admin), and one default fever threshold. It contains zero patients, temperature readings, doctor visits, or audit records.
+
+`npm run db:reset:dev` is a **destructive, local-development/submission-prep-only** command. It resets the local database without invoking Prisma's configured seed hook, then explicitly runs `prisma/seed.cjs` to restore the clean baseline. Never run it against production.
+
+Optional sample business data is separate: `npm run seed:demo` invokes `prisma/seed-demo.cjs` only when explicitly requested. It is dev-only and is not part of clean initialization, the reset command, or the baseline a reviewer should see.
