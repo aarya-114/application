@@ -1,0 +1,99 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  NURSE
+  DOCTOR
+  ADMIN
+}
+
+enum PatientStatus {
+  ADMITTED
+  ACTIVE
+  DISCHARGE_ELIGIBLE
+  DISCHARGED
+}
+
+enum PatientOutcome {
+  ONGOING
+  CURED
+  DECEASED
+}
+
+model User {
+  id                    String                  @id @default(cuid())
+  name                  String
+  role                  UserRole
+  createdAt             DateTime                @default(now())
+  temperatureReadings   TemperatureReading[]
+  doctorVisits          DoctorVisit[]
+  feverThresholdChanges FeverThresholdSetting[]
+  auditLogs             AuditLog[]
+}
+
+model Room {
+  id       String    @id @default(cuid())
+  number   Int       @unique
+  patients Patient[]
+}
+
+model Patient {
+  id           String               @id @default(cuid())
+  name         String
+  roomId       String?              @unique
+  status       PatientStatus        @default(ADMITTED)
+  admittedAt   DateTime             @default(now())
+  dischargedAt DateTime?
+  outcome      PatientOutcome       @default(ONGOING)
+  room         Room?                @relation(fields: [roomId], references: [id])
+  readings     TemperatureReading[]
+  doctorVisits DoctorVisit[]
+  auditLogs    AuditLog[]
+}
+
+model TemperatureReading {
+  id           String   @id @default(cuid())
+  patientId    String
+  value        Float
+  recordedById String
+  recordedAt   DateTime @default(now())
+  note         String?
+  patient      Patient  @relation(fields: [patientId], references: [id])
+  recordedBy   User     @relation(fields: [recordedById], references: [id])
+}
+
+model DoctorVisit {
+  id        String   @id @default(cuid())
+  patientId String
+  doctorId  String
+  visitedAt DateTime @default(now())
+  note      String?
+  patient   Patient  @relation(fields: [patientId], references: [id])
+  doctor    User     @relation(fields: [doctorId], references: [id])
+}
+
+model FeverThresholdSetting {
+  id            String   @id @default(cuid())
+  value         Float
+  setById       String
+  effectiveFrom DateTime
+  createdAt     DateTime @default(now())
+  setBy         User     @relation(fields: [setById], references: [id])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  actorId   String
+  action    String
+  patientId String?
+  details   String
+  createdAt DateTime @default(now())
+  actor     User     @relation(fields: [actorId], references: [id])
+  patient   Patient? @relation(fields: [patientId], references: [id])
+}
