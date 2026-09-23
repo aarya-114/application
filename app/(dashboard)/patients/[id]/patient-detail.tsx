@@ -62,9 +62,13 @@ type TimelineEvent =
   | { kind: "visit"; at: string; visit: Visit }
   | { kind: "shared"; at: string; label: string; detail?: string };
 
-const TIMELINE_MIN_HEIGHT = 400;
-const TIMELINE_EVENT_HEIGHT = 68;
-const TIMELINE_TIME_PADDING_RATIO = 0.2;
+type TimelineRow = {
+  timestamp: number;
+  at: string;
+  temperatures: Reading[];
+  visits: Visit[];
+  shared: Array<Extract<TimelineEvent, { kind: "shared" }>>;
+};
 
 function formatPatientTime(value: string) {
   return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
@@ -152,10 +156,10 @@ export default function PatientDetail({ patientId }: { patientId: string }) {
             const { date, dayNumber, details, readings, visits } = activeDay;
           const hasFever = details.readings.some((reading) => reading.feverClassification === "FEVER");
           const noThreshold = details.readings.some((reading) => reading.feverClassification === "THRESHOLD_NOT_CONFIGURED");
-            const events = buildTimelineEvents(patient, data.auditHistory, readings, visits, date);
+            const rows = buildTimelineRows(buildTimelineEvents(patient, data.auditHistory, readings, visits, date));
             return <>
               <div className="mb-3 flex flex-wrap items-end justify-between gap-2 rounded-xl border border-slate-200 bg-white p-3"><div><h3 className="font-semibold text-slate-900">{formatUtcDate(date)}</h3><p className="text-xs text-slate-500">Day {dayNumber}</p></div><span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700">{readings.length} temperature reading{readings.length === 1 ? "" : "s"} · {visits.length} doctor visit{visits.length === 1 ? "" : "s"}</span></div>
-              <SharedDayTimeline date={date} events={events} readingCount={readings.length} visitCount={visits.length} />
+              <SharedDayTimeline date={date} rows={rows} readingCount={readings.length} visitCount={visits.length} />
               <section aria-label="Fever-free streak result" className="mt-4 rounded-xl border border-slate-200 bg-white p-4"><h4 className="text-sm font-semibold text-slate-900">Fever-free streak</h4>
                 {details.feverFree ? <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-slate-700"><span>Fever-free · Streak: {details.streakLength} day{details.streakLength === 1 ? "" : "s"}</span>{details.streakLength >= 3 && <StatusBadge value="DISCHARGE_ELIGIBLE">Discharge eligible</StatusBadge>}</div> : <p className="mt-2 text-sm font-medium text-slate-700">{readings.length === 0 ? "Missing temperature · streak broken" : noThreshold ? "Classification unavailable (threshold not configured) · streak broken" : hasFever ? "Fever detected · streak broken" : "Day does not qualify · streak broken"}</p>}
               </section>
@@ -210,48 +214,59 @@ function buildTimelineEvents(
   return events.sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
 }
 
+function buildTimelineRows(events: TimelineEvent[]): TimelineRow[] {
+  const rows = new Map<number, TimelineRow>();
+  for (const event of events) {
+    const timestamp = new Date(event.at).getTime();
+    let row = rows.get(timestamp);
+    if (!row) {
+      row = { timestamp, at: event.at, temperatures: [], visits: [], shared: [] };
+      rows.set(timestamp, row);
+    }
+    if (event.kind === "temperature") row.temperatures.push(event.reading);
+    else if (event.kind === "visit") row.visits.push(event.visit);
+    else row.shared.push(event);
+  }
+  return Array.from(rows.values()).sort((a, b) => a.timestamp - b.timestamp);
+}
+
 function SharedDayTimeline({
   date,
-  events,
+  rows,
   readingCount,
   visitCount,
 }: {
   date: string;
-  events: TimelineEvent[];
+  rows: TimelineRow[];
   readingCount: number;
   visitCount: number;
 }) {
-  const timestamps = events.map((event) => new Date(event.at).getTime());
-  const first = timestamps.length ? Math.min(...timestamps) : 0;
-  const last = timestamps.length ? Math.max(...timestamps) : 0;
-  const eventSpan = last - first;
-  const timePadding = eventSpan > 0 ? eventSpan * TIMELINE_TIME_PADDING_RATIO : 0;
-  const timelineHeight = Math.max(TIMELINE_MIN_HEIGHT, events.length * TIMELINE_EVENT_HEIGHT + 60);
-  const getY = (event: TimelineEvent) => {
-    if (last === first) return timelineHeight / 2;
-    const rangeStart = first - timePadding;
-    const rangeEnd = last + timePadding;
-    return ((new Date(event.at).getTime() - rangeStart) / (rangeEnd - rangeStart)) * timelineHeight;
-  };
-  const temperature = events.filter((event): event is Extract<TimelineEvent, { kind: "temperature" }> => event.kind === "temperature");
-  const visits = events.filter((event): event is Extract<TimelineEvent, { kind: "visit" }> => event.kind === "visit");
-  const shared = events.filter((event): event is Extract<TimelineEvent, { kind: "shared" }> => event.kind === "shared");
-
   return <section aria-label={`Synchronized timeline for ${formatUtcDate(date)}`}>
-    <div className="grid grid-cols-2 gap-2 px-1 pb-2 sm:gap-4 sm:px-3">
+    <div className="grid grid-cols-[minmax(0,1fr)_5.5rem_minmax(0,1fr)] gap-1 px-1 pb-2 sm:grid-cols-[minmax(0,1fr)_7rem_minmax(0,1fr)] sm:gap-3 sm:px-3">
       <h4 className="text-center text-xs font-semibold uppercase tracking-wide text-teal-800">Temperature</h4>
+      <span aria-hidden="true" />
       <h4 className="text-center text-xs font-semibold uppercase tracking-wide text-indigo-800">Doctor visits</h4>
     </div>
     <div role="region" tabIndex={0} className="max-h-[28rem] overflow-y-auto overscroll-contain rounded-xl border border-slate-200 bg-white shadow-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal-700" aria-label="Scrollable day timeline">
-      <div className="relative grid grid-cols-2" style={{ height: timelineHeight }}>
-        <div aria-hidden="true" className="absolute bottom-0 left-1/4 top-0 border-l-2 border-teal-200" />
-        <div aria-hidden="true" className="absolute bottom-0 left-3/4 top-0 border-l-2 border-indigo-200" />
-        {readingCount === 0 && <p className="absolute left-0 top-3 z-10 w-1/2 px-2 text-center text-xs text-slate-500 sm:px-4">No temperature readings recorded for this day.</p>}
-        {visitCount === 0 && <p className="absolute right-0 top-3 z-10 w-1/2 px-2 text-center text-xs text-slate-500 sm:px-4">No doctor visits recorded for this day.</p>}
-        {temperature.map((event) => <TemperatureTimelineMarker key={event.reading.id} event={event} y={getY(event)} placeAbove={getY(event) > timelineHeight - 110} />)}
-        {visits.map((event) => <VisitTimelineMarker key={event.visit.id} event={event} y={getY(event)} placeAbove={getY(event) > timelineHeight - 110} />)}
-        {shared.map((event, index) => <div key={`${event.label}-${event.at}-${index}`} className="absolute left-1/2 z-20 flex max-w-[92%] -translate-x-1/2 -translate-y-1/2 flex-col items-center rounded-lg border border-slate-300 bg-white px-3 py-2 text-center text-xs text-slate-700 shadow-sm" style={{ top: getY(event) }}><span className="mb-1 size-2.5 rounded-full bg-slate-500 ring-2 ring-white" aria-hidden="true" /><time className="font-semibold" dateTime={event.at} title={formatPatientTime(event.at)}>{formatPatientClock(event.at)}</time><span className="font-semibold">{event.label}</span>{event.detail && <span>{event.detail}</span>}</div>)}
-      </div>
+      {rows.length === 0 ? <div className="grid min-h-24 grid-cols-[minmax(0,1fr)_5.5rem_minmax(0,1fr)] items-center gap-1 p-2 text-center text-xs text-slate-500 sm:grid-cols-[minmax(0,1fr)_7rem_minmax(0,1fr)]"><p>No temperature readings recorded for this day.</p><span aria-hidden="true" className="mx-auto h-full border-l-2 border-slate-200" /><p>No doctor visits recorded for this day.</p></div> : <>
+        {(readingCount === 0 || visitCount === 0) && <div className="grid grid-cols-[minmax(0,1fr)_5.5rem_minmax(0,1fr)] items-center gap-1 border-b border-slate-100 px-2 py-2 text-center text-[10px] text-slate-500 sm:grid-cols-[minmax(0,1fr)_7rem_minmax(0,1fr)] sm:text-xs"><p>{readingCount === 0 ? "No temperature readings recorded for this day." : ""}</p><span aria-hidden="true" className="mx-auto h-5 border-l-2 border-slate-200" /><p>{visitCount === 0 ? "No doctor visits recorded for this day." : ""}</p></div>}
+        <ol className="divide-y divide-slate-100">
+        {rows.map((row) => <li key={row.timestamp} className="grid min-h-[72px] grid-cols-[minmax(0,1fr)_5.5rem_minmax(0,1fr)] items-stretch gap-1 sm:grid-cols-[minmax(0,1fr)_7rem_minmax(0,1fr)] sm:gap-3">
+          <div className="flex min-w-0 items-center justify-end gap-1.5 border-r-2 border-teal-100 py-2 pr-1.5 sm:gap-2 sm:pr-3">
+            <div className="flex min-w-0 flex-1 flex-col items-end gap-2">{row.temperatures.map((reading) => <TemperatureTimelineCard key={reading.id} reading={reading} />)}</div>
+            {row.temperatures.length > 0 && <span aria-hidden="true" className="size-3 shrink-0 rounded-full border-2 border-white bg-teal-700 ring-1 ring-teal-300" />}
+          </div>
+          <div className="flex min-w-0 flex-col items-center justify-center gap-1 px-0.5 py-2 text-center">
+            <time className="whitespace-nowrap text-[11px] font-semibold text-slate-600 sm:text-xs" dateTime={row.at} title={formatPatientTime(row.at)}>{formatPatientClock(row.at)}</time>
+            {row.shared.map((event, index) => <div key={`${event.label}-${index}`} className="flex w-full min-w-0 flex-col items-center rounded-md border border-slate-200 bg-slate-50 px-1 py-1.5 text-[10px] leading-tight text-slate-700 sm:px-2 sm:text-xs"><span aria-hidden="true" className="mb-1 size-2.5 shrink-0 rounded-full bg-slate-500 ring-2 ring-white" /><span className="break-words font-semibold">{event.label}</span>{event.detail && <span className="break-words">{event.detail}</span>}</div>)}
+          </div>
+          <div className="flex min-w-0 items-center gap-1.5 border-l-2 border-indigo-100 py-2 pl-1.5 sm:gap-2 sm:pl-3">
+            {row.visits.length > 0 && <span aria-hidden="true" className="size-3 shrink-0 rounded-full border-2 border-white bg-indigo-700 ring-1 ring-indigo-300" />}
+            <div className="flex min-w-0 flex-1 flex-col items-start gap-2">{row.visits.map((visit) => <VisitTimelineCard key={visit.id} visit={visit} />)}</div>
+          </div>
+        </li>)}
+        </ol>
+      </>}
     </div>
   </section>;
 }
@@ -265,35 +280,25 @@ function auditRoomNumber(details: string): number | null {
   }
 }
 
-function TemperatureTimelineMarker({ event, y, placeAbove }: { event: Extract<TimelineEvent, { kind: "temperature" }>; y: number; placeAbove: boolean }) {
-  const reading = event.reading;
+function TemperatureTimelineCard({ reading }: { reading: Reading }) {
   const classification = reading.feverClassification;
   const classificationLabel = classification === "NO_FEVER" ? "No fever" : classification === "FEVER" ? "Fever" : "Classification unavailable";
   const comparison = reading.applicableThreshold && classification !== "THRESHOLD_NOT_CONFIGURED"
     ? `${reading.value} ${classification === "FEVER" ? "≥" : "<"} ${reading.applicableThreshold.value} °C`
     : "Threshold not configured at reading time";
-  return <div className="absolute left-0 z-10 w-1/2 px-1 sm:px-2" style={{ top: y, transform: "translateY(-10px)" }}>
-    <span aria-hidden="true" className="absolute left-1/2 top-0 z-20 size-5 -translate-x-1/2 rounded-full border-4 border-white bg-teal-700 shadow ring-1 ring-teal-300" />
-    <article className={`mx-auto w-full max-w-[18rem] rounded-lg border border-teal-100 bg-white p-2 text-center text-xs shadow-sm sm:p-3 ${placeAbove ? "absolute bottom-full mb-2" : "mt-5"}`}>
-      <time className="block font-semibold text-slate-600" dateTime={reading.recordedAt} title={formatPatientTime(reading.recordedAt)}>{formatPatientClock(reading.recordedAt)}</time>
-      <h5 className="mt-0.5 font-semibold leading-tight text-slate-900">Temperature recorded</h5>
-      <p className="mt-1 font-semibold text-slate-900">{reading.value} °C <span className="font-medium text-slate-700">· {classificationLabel}</span></p>
-      <details className="mt-1 text-left text-slate-600"><summary className="cursor-pointer text-center text-[11px] font-medium text-teal-800">Reading details</summary><dl className="mt-2 space-y-1 border-t border-slate-100 pt-2"><div><dt className="inline">Applicable threshold: </dt><dd className="inline">{reading.applicableThreshold ? `${reading.applicableThreshold.value} °C` : "Not configured"}</dd></div><div><dt className="inline">Comparison: </dt><dd className="inline">{comparison}</dd></div><div><dt className="inline">Recorded by: </dt><dd className="inline">{reading.recordedBy.name} · {reading.recordedBy.role}</dd></div>{reading.note && <div><dt className="inline">Note: </dt><dd className="inline whitespace-pre-wrap">{reading.note}</dd></div>}</dl></details>
-    </article>
-  </div>;
+  return <article className="w-full min-w-0 rounded-md border border-teal-100 bg-teal-50/40 p-1.5 text-right text-[11px] leading-snug text-slate-800 sm:max-w-[18rem] sm:p-2 sm:text-xs">
+    <h5 className="font-semibold">Temperature recorded</h5>
+    <p className="break-words font-medium">{reading.value} °C · {classificationLabel}</p>
+    <details className="mt-1 text-left text-slate-600"><summary className="cursor-pointer break-words text-right text-[10px] font-medium text-teal-800 sm:text-[11px]">Reading details</summary><dl className="mt-2 space-y-1 border-t border-slate-100 pt-2"><div><dt className="inline">Applicable threshold: </dt><dd className="inline break-words">{reading.applicableThreshold ? `${reading.applicableThreshold.value} °C` : "Not configured"}</dd></div><div><dt className="inline">Comparison: </dt><dd className="inline break-words">{comparison}</dd></div><div><dt className="inline">Recorded by: </dt><dd className="inline break-words">{reading.recordedBy.name} · {reading.recordedBy.role}</dd></div>{reading.note && <div><dt className="inline">Note: </dt><dd className="inline whitespace-pre-wrap break-words">{reading.note}</dd></div>}</dl></details>
+  </article>;
 }
 
-function VisitTimelineMarker({ event, y, placeAbove }: { event: Extract<TimelineEvent, { kind: "visit" }>; y: number; placeAbove: boolean }) {
-  const visit = event.visit;
-  return <div className="absolute right-0 z-10 w-1/2 px-1 sm:px-2" style={{ top: y, transform: "translateY(-10px)" }}>
-    <span aria-hidden="true" className="absolute left-1/2 top-0 z-20 size-5 -translate-x-1/2 rounded-full border-4 border-white bg-indigo-700 shadow ring-1 ring-indigo-300" />
-    <article className={`mx-auto w-full max-w-[18rem] rounded-lg border border-indigo-100 bg-white p-2 text-center text-xs shadow-sm sm:p-3 ${placeAbove ? "absolute bottom-full mb-2" : "mt-5"}`}>
-      <time className="block font-semibold text-slate-600" dateTime={visit.visitedAt} title={formatPatientTime(visit.visitedAt)}>{formatPatientClock(visit.visitedAt)}</time>
-      <h5 className="mt-0.5 font-semibold leading-tight text-slate-900">Doctor visit</h5>
-      <p className="mt-1 break-words font-medium text-slate-800">{visit.doctor.name}</p>
-      <details className="mt-1 text-left text-slate-600"><summary className="cursor-pointer text-center text-[11px] font-medium text-indigo-800">Visit details</summary><dl className="mt-2 space-y-1 border-t border-slate-100 pt-2"><div><dt className="inline">Doctor: </dt><dd className="inline">{visit.doctor.name} · {visit.doctor.role}</dd></div>{visit.note && <div><dt className="inline">Note: </dt><dd className="inline whitespace-pre-wrap">{visit.note}</dd></div>}</dl></details>
-    </article>
-  </div>;
+function VisitTimelineCard({ visit }: { visit: Visit }) {
+  return <article className="w-full min-w-0 rounded-md border border-indigo-100 bg-indigo-50/40 p-1.5 text-left text-[11px] leading-snug text-slate-800 sm:max-w-[18rem] sm:p-2 sm:text-xs">
+    <h5 className="font-semibold">Doctor visit</h5>
+    <p className="break-words font-medium">{visit.doctor.name}</p>
+    <details className="mt-1 text-slate-600"><summary className="cursor-pointer break-words text-[10px] font-medium text-indigo-800 sm:text-[11px]">Visit details</summary><dl className="mt-2 space-y-1 border-t border-slate-100 pt-2"><div><dt className="inline">Doctor: </dt><dd className="inline break-words">{visit.doctor.name} · {visit.doctor.role}</dd></div>{visit.note && <div><dt className="inline">Note: </dt><dd className="inline whitespace-pre-wrap break-words">{visit.note}</dd></div>}</dl></details>
+  </article>;
 }
 
 function formatPatientClock(value: string) {
